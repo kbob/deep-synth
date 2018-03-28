@@ -1,5 +1,8 @@
-*bak
-_autosave-*
-*.net
-*.zip
+*.bin
+*.d
+*.elf
+*.hex
+*.map
+*.o
+*.sublime-workspace
 .gdbinit

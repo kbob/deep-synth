@@ -1,15 +1,9 @@
-[submodule "hardware/lib/pkl"]
-	path = hardware/lib/pkl
-	url = https://github.com/esden/pretty-kicad-libs.git
-[submodule "hardware/lib/1bitsy"]
-	path = hardware/lib/1bitsy
-	url = https://github.com/1Bitsy/1bitsy-hardware-lib.git
 [submodule "lib/pkl"]
 	path = lib/pkl
 	url = https://github.com/esden/pretty-kicad-libs.git
 [submodule "firmware/libopencm3"]
-	path = firmware/libopencm3
+	path = libopencm3
 	url = https://github.com/libopencm3/libopencm3.git
 [submodule "firmware/src/assets/miniwi"]
-	path = firmware/src/assets/miniwi
+	path = src/assets/miniwi
 	url = https://github.com/josuah/miniwi.git
