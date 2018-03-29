@@ -17,11 +17,11 @@
 ## along with this library.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-BINARY = 1up-native
+BINARY = deep-synth
 
-OBJS := main.o audio.o audio_app.o button_boot.o gamepad.o		\
-        gfx-pixslice.o gpio.o i2c.o lcd.o led.o munch_app.o pam8019.o	\
-        systick.o text.o tile_app.o volume.o
+OBJS := main.o audio.o audio_app.o button_boot.o deep_app.o gamepad.o	\
+        gfx-pixslice.o gpio.o i2c.o lcd.o led.o pam8019.o systick.o	\
+        text.o volume.o
 
 LDSCRIPT = 1bitsy-stm32f415rgt-gfx.ld
 
@@ -33,7 +33,7 @@ include ../libopencm3.target.mk
 cflags := $(filter_out -O%, $(CFLAGS)) -Werror -g
 # In theory this -O should be valid for everything but video.o but somehow it
 # affects everything? :(
-OPT 	:= -O3
+OPT 	:= -O0
 CFLAGS	 = $(cflags) $(OPT)
 
 # If your project is using a specific C standard you can set it by uncommenting
@@ -42,7 +42,7 @@ CFLAGS	 = $(cflags) $(OPT)
 
 lcd.o: OPT := -O0
 
-text.o tile_app.o: assets/assets.h
+text.o: assets/assets.h
 
 assets/assets.h: assets/gen-assets.py assets/*.png
 	@printf "  ASSETS  $?\n"

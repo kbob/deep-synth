@@ -37,9 +37,7 @@
 #include "text.h"
 
 /* "Apps" */
-#include "munch_app.h"
-#include "tile_app.h"
-#include "audio_app.h"
+#include "deep_app.h"
 
 #define MY_CLOCK (rcc_hse_25mhz_3v3[RCC_CLOCK_3V3_168MHZ])
 #define BG_COLOR 0x0000         // black
@@ -47,11 +45,9 @@
 uint32_t   fps;
 
 enum app_ids {
-    munch_app,
-    tile_app,
-    audio_app,
+    deep_app,
     end_app
-} active_app = munch_app;
+} active_app = deep_app;
 
 /* Function pointers to available apps. The first one executes by default.
  * Do not forget to adjust the enum if you are messing around with this list.
@@ -62,23 +58,11 @@ struct app {
 	void (*render)(void);
 	void (*end)(void);
 } apps[] = {
-	[munch_app] = {
-		.init = munch_init,
-		.animate = munch_animate,
-		.render = munch_render,
-                .end = NULL,
-	},
-	[tile_app] = {
-		.init = tile_init,
-		.animate = tile_animate,
-		.render = tile_render,
-                .end = NULL,
-	},
-	[audio_app] = {
-		.init = audio_app_init,
-		.animate = audio_animate,
-		.render = audio_render,
-                .end = audio_app_end,
+	[deep_app] = {
+		.init = deep_app_init,
+		.animate = deep_animate,
+		.render = deep_render,
+                .end = deep_app_end,
 	},
 };
 

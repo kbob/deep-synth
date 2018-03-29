@@ -21,6 +21,7 @@ PREFIX		?= arm-none-eabi
 #PREFIX		?= arm-elf
 
 # Be silent per default, but 'make V=1' will show all compiler calls.
+V := 1
 ifneq ($(V),1)
 Q := @
 # Do not print "Entering directory ...".
