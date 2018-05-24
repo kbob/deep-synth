@@ -98,9 +98,6 @@ static void setup(void)
 
     /* Raise ~SHUTDOWN to enable audio output. */
     pam8019_set_mode(PM_SHUTDOWN);
-    // gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO3);
-    // gpio_set(GPIOA, GPIO3);
-    // gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO0);
 }
 
 static void calc_fps(void)
@@ -166,4 +163,3 @@ int main(void)
     setup();
     run();
 }
-

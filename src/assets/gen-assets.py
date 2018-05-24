@@ -60,7 +60,7 @@ static const uint16_t ts_pixmap[TS_PIXMAP_HEIGHT][TS_PIXMAP_WIDTH] = {{
 ts_def = ts_template.format(h=ts_h, w=ts_w, bytes=ts_bytes)
 
 ########################################################################
-# Tilesheet
+# Spritesheet
 ########################################################################
 
 ss_path = 'spritesheet.png'
@@ -188,13 +188,21 @@ template = '''
 
 #include <stdint.h>
 
+#if 0
 {ts_def}
+#endif
 
+#if 0
 {ss_def}
+#endif
 
+#if 0
 {tml1_def}
+#endif
 
+#if 1
 {miniwi_def}
+#endif
 
 #endif /* ASSETS_H */
 '''.lstrip()

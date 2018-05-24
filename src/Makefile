@@ -19,9 +19,9 @@
 
 BINARY = deep-synth
 
-OBJS := main.o audio.o audio_app.o button_boot.o deep_app.o gamepad.o	\
-        gfx-pixslice.o gpio.o i2c.o lcd.o led.o pam8019.o systick.o	\
-        text.o volume.o
+OBJS := main.o audio.o audio_app.o button_boot.o deep_app.o demo.o	\
+        gamepad.o gfx-pixslice.o gpio.o lcd.o led.o pam8019.o		\
+        synth.o systick.o text.o volume.o
 
 LDSCRIPT = 1bitsy-stm32f415rgt-gfx.ld
 
@@ -40,13 +40,16 @@ CFLAGS	 = $(cflags) $(OPT)
 # the following line and adjusting the -std flag accordingly
 #CFLAGS		+= -std=gnu11 -pedantic
 
+LDLIBS  += -lm
+
 lcd.o: OPT := -O0
 
 text.o: assets/assets.h
 
-assets/assets.h: assets/gen-assets.py assets/*.png
+assets/assets.h: assets/gen-assets.py assets/*.png assets/miniwi/miniwi-8.bdf
 	@printf "  ASSETS  $?\n"
-	$(Q)cd assets; python3 ./gen-assets.py > assets.h
+	@# There's got to be a better way to do this...
+	$(Q)(cd assets; python3 ./gen-assets.py) > $@ || { rm -f $@; false; }
 
 clean::
 	$(Q)$(RM) -f assets/assets.h
