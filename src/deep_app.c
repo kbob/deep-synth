@@ -161,7 +161,7 @@ void deep_animate(void)
             seg1_ymax = SEG1_Y0;
             seg2_xlmax = SEG2_XL0;
             seg2_xrmin = SEG2_XR0;
-            txt_color = 0;
+            txt_color = bg_color;
             spark_count = 2;
             spark_points[0].x = seg0_xmin;
             spark_points[0].y = SEG0_Y;
@@ -202,13 +202,13 @@ void deep_animate(void)
     case 3:
         // segment 3: fade in text
         {
-            seg_len = 16 + 20;
+            seg_len = 48 + 20;
             int b = anim_frame;
             b -= 20;
             if (b < 0)
                 b = 0;
             else {
-                b *= b;
+                b *= b / 3;
                 if (b > 255)
                     b = 255;
             }
@@ -245,9 +245,13 @@ static void deep_render_slice(gfx_pixslice *slice)
     for (int y = SEG1_Y0; y < seg1_ymax; y++) {
         gfx_rgb565 *line = gfx_pixel_address(slice, 0, y);
         if (line) {
-            for (int x = SEG1_XL - BLUE_SPREAD_L; x < SEG1_XL + BLUE_SPREAD_R; x++)
+            int x0 = SEG1_XL - BLUE_SPREAD_L;
+            int x1 = SEG1_XL + BLUE_SPREAD_R;
+            for (int x = x0; x < x1; x++)
                 line[x] = fg_color;
-            for (int x = SEG1_XR - BLUE_SPREAD_L; x < SEG1_XR + BLUE_SPREAD_R; x++)
+            x0 = SEG1_XR - BLUE_SPREAD_L;
+            x1 = SEG1_XR + BLUE_SPREAD_R;
+            for (int x = x0; x < x1; x++)
                 line[x] = fg_color;
         }
     }
@@ -268,7 +272,7 @@ static void deep_render_slice(gfx_pixslice *slice)
         const char msg[] = "Press and hold any key";
         const size_t nc = sizeof msg - 1;
         int x = (LCD_WIDTH - nc * 8) / 2 / 8;
-        int y = LCD_HEIGHT * 8/15 / 16;
+        int y = LCD_HEIGHT * 9/15 / 16;
         text_draw_str16(slice, msg, x, y, txt_color);
     }
 
