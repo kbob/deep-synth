@@ -1,7 +1,6 @@
 #include "synth.h"
 
 //#define HURRY_UP 8
-#define SIMPLE_SWEEP
 
 #include <assert.h>
 #include <limits.h>
@@ -37,38 +36,20 @@
 #define V_DEST_NOISE_FREQ  0.1
 #define V_DEST_NOISE_MAX   10.0
 
-#ifdef SIMPLE_SWEEP
+#define V_SWEEP_FOCUS_DUR_MIN 3.0
+#define V_SWEEP_FOCUS_DUR_MAX 4.0
+#define V_SWEEP_FOCUS_EXP_MIN 3.0
+#define V_SWEEP_FOCUS_EXP_MAX 5.0
 
-    #define V_SWEEP_FOCUS_DUR_MIN 3.0
-    #define V_SWEEP_FOCUS_DUR_MAX 4.0
-    #define V_SWEEP_FOCUS_EXP_MIN 3.0
-    #define V_SWEEP_FOCUS_EXP_MAX 5.0
+// #define V_SWEEP_SLIDE_DUR_MIN 0.8
+// #define V_SWEEP_SLIDE_DUR_MAX 1.2
+// #define V_SWEEP_SLIDE_EXP_MIN 1.0
+// #define V_SWEEP_SLIDE_EXP_MAX 2.0
 
-    #define V_SWEEP_SLIDE_DUR_MIN 0.8
-    #define V_SWEEP_SLIDE_DUR_MAX 1.2
-    #define V_SWEEP_SLIDE_EXP_MIN 1.0
-    #define V_SWEEP_SLIDE_EXP_MAX 2.0
-
-    #define V_SWEEP_BLUR_DUR_MIN  3.0
-    #define V_SWEEP_BLUR_DUR_MAX  3.5
-    #define V_SWEEP_BLUR_EXP_MIN  3.0
-    #define V_SWEEP_BLUR_EXP_MAX  5.0
-
-#else
-
-    #define V_SWEEP_MID_MIN    0.1
-    #define V_SWEEP_MID_MAX    0.2
-    #define V_SWEEP_DUR1_MIN   5.5
-    #define V_SWEEP_DUR1_MAX   6.0
-    #define V_SWEEP_DUR2_MIN   8.5
-    #define V_SWEEP_DUR2_MAX   9.0
-    #define V_SWEEP_CURVE1_MIN 2.0
-    #define V_SWEEP_CURVE1_MAX 3.0
-    #define V_SWEEP_CURVE2_MIN 4.0
-    #define V_SWEEP_CURVE2_MAX 5.0
-
-#endif
-
+#define V_SWEEP_BLUR_DUR_MIN  3.0
+#define V_SWEEP_BLUR_DUR_MAX  3.5
+#define V_SWEEP_BLUR_EXP_MIN  3.0
+#define V_SWEEP_BLUR_EXP_MAX  5.0
 
 #define V_LOWPASS_H        6.0  // number of harmonics
 #define V_LOWPASS_Q        1.67
@@ -79,18 +60,12 @@
 #define G_LOWPASS_FREQ_MIN 2000.0
 #define G_LOWPASS_FREQ_MAX 20000.0
 #define G_LOWPASS_DUR1     8.0
-// #define G_LOWPASS_DUR2     4.0
 #define G_LOWPASS_CURVE1   2.0
-// #define G_LOWPASS_CURVE2   4.0
 #define G_LOWPASS_Q        2.0
 #define G_AMP_RISE_DUR     4.0
-// #define G_AMP_FULL_DUR     21.0
-// #define G_AMP_FALL_DUR     4.0
 #define G_AMP_CURVE1       2.0
-// #define G_AMP_CURVE3     (-4.0)
 
 static float midi_to_freq[MIDI_NOTE_COUNT];
-// static float midi_to_phase_delta[128];
 
 typedef float frame[2];
 
@@ -106,25 +81,12 @@ typedef struct env_cfg {
     float             curves[MAX_ENV_SEGS];
 } env_cfg;
 
-#ifdef SIMPLE_SWEEP
-
 typedef struct sweeper_cfg {
     float             focus_dur;
     float             focus_exp;
-    float             slide_dur;
-    float             slide_exp;
     float             blur_dur;
     float             blur_exp;
 } sweeper_cfg;
-
-#else
-
-typedef struct sweeper_cfg {
-    env_cfg           focus;
-    env_cfg           blur;
-} sweeper_cfg;
-
-#endif
 
 typedef struct filter_cfg {
     float             q;
@@ -175,11 +137,8 @@ typedef struct env_state {
 
 typedef enum direction {
     D_FOCUSING,
-    // D_SLIDING,
     D_BLURRING,
 } direction;
-
-#ifdef SIMPLE_SWEEP
 
 typedef struct sweeper_state {
     enum direction    direction;
@@ -187,17 +146,6 @@ typedef struct sweeper_state {
     float             delta;
     float             grow;
 } sweeper_state;
-
-#else
-
-typedef struct sweeper_state {
-    enum direction    direction;
-    float             value;
-    env_state         focus;
-    env_state         blur;
-} sweeper_state;
-
-#endif
 
 typedef struct osc_state {
     float             phase;
@@ -243,8 +191,8 @@ static global_state gstate;
 static size_t saved_frame_count;
 static unsigned active_note_count;
 
-// MIDI note is a float because we're initially tuning halfway between
-// D and E-Flat.
+// MIDI note is a float because the original Deep Note was tune
+//  halfway between D and E-Flat.
 static float midicps(float midi_note)
 {
     // Ref. to A4 (note 69) == 440 Hz.
@@ -292,43 +240,12 @@ static void init_cfg(global_cfg *g)
         v->dest_noise.freq = V_DEST_NOISE_FREQ;
         v->dest_noise.amp = (i + 1) * V_DEST_NOISE_MAX / VOICE_COUNT;
 
-#ifdef SIMPLE_SWEEP
-
         v->sweep.focus_dur =
             rrand(V_SWEEP_FOCUS_DUR_MIN, V_SWEEP_FOCUS_DUR_MAX);
         v->sweep.focus_exp =
             rrand(V_SWEEP_FOCUS_EXP_MIN, V_SWEEP_FOCUS_EXP_MAX);
-        v->sweep.slide_dur =
-            rrand(V_SWEEP_SLIDE_DUR_MIN, V_SWEEP_SLIDE_DUR_MAX);
-        v->sweep.slide_exp =
-            rrand(V_SWEEP_SLIDE_EXP_MIN, V_SWEEP_SLIDE_EXP_MAX);
         v->sweep.blur_dur = rrand(V_SWEEP_BLUR_DUR_MIN, V_SWEEP_BLUR_DUR_MAX);
         v->sweep.blur_exp = rrand(V_SWEEP_BLUR_EXP_MIN, V_SWEEP_BLUR_EXP_MAX);
-
-#else
-
-        env_cfg *focus = &v->sweep.focus;
-        env_cfg *blur = &v->sweep.blur;
-
-        focus->seg_count = 2;
-        focus->levels[0] = 0.0;
-        focus->levels[1] = rrand(V_SWEEP_MID_MIN, V_SWEEP_MID_MAX);
-        focus->levels[2] = 1.0;
-        focus->durations[0] = rrand(V_SWEEP_DUR1_MIN, V_SWEEP_DUR1_MAX);
-        focus->durations[1] = rrand(V_SWEEP_DUR2_MIN, V_SWEEP_DUR2_MAX);
-        focus->curves[0] = rrand(V_SWEEP_CURVE1_MIN, V_SWEEP_CURVE1_MAX);
-        focus->curves[1] = rrand(V_SWEEP_CURVE2_MIN, V_SWEEP_CURVE2_MAX);
-
-        blur->seg_count = 2;
-        blur->levels[0] = 1.0;
-        blur->levels[1] = rrand(V_SWEEP_MID_MIN, V_SWEEP_MID_MAX);
-        blur->levels[2] = 0.0;
-        blur->durations[0] = rrand(V_SWEEP_DUR2_MIN, V_SWEEP_DUR2_MAX);
-        blur->durations[1] = rrand(V_SWEEP_DUR1_MIN, V_SWEEP_DUR1_MAX);
-        blur->curves[0] = rrand(V_SWEEP_CURVE2_MIN, V_SWEEP_CURVE2_MAX);
-        blur->curves[1] = rrand(V_SWEEP_CURVE1_MIN, V_SWEEP_CURVE1_MAX);
-
-#endif
 
         v->lowpass.q = V_LOWPASS_Q;
 
@@ -338,18 +255,8 @@ static void init_cfg(global_cfg *g)
         v->pan = rrand(V_PAN_LEFT, V_PAN_RIGHT);
 
 #ifdef HURRY_UP
-    #ifdef SIMPLE_SWEEP
         v->sweep.focus_dur /= HURRY_UP;
-        v->sweep.slide_dur /= HURRY_UP;
         v->sweep.blur_dur  /= HURRY_UP;
-    #else
-        v->sweep.focus.durations[0] /= HURRY_UP;
-        v->sweep.focus.durations[1] /= HURRY_UP;
-        v->sweep.focus.durations[2] /= HURRY_UP;
-        v->sweep.blur.durations[0] /= HURRY_UP;
-        v->sweep.blur.durations[1] /= HURRY_UP;
-        v->sweep.blur.durations[2] /= HURRY_UP;
-    #endif /* SIMPLE_SWEEP */
 #endif /* HURRY_UP */
     }
 
@@ -358,25 +265,16 @@ static void init_cfg(global_cfg *g)
     g->lowpass_env.seg_count = 1;
     g->lowpass_env.levels[0] = 0;
     g->lowpass_env.levels[1] = 1;
-    // g->lowpass_env.levels[2] = 0;
     g->lowpass_env.durations[0] = G_LOWPASS_DUR1;
-    // g->lowpass_env.durations[1] = G_LOWPASS_DUR2;
     g->lowpass_env.curves[0] = G_LOWPASS_CURVE1;
-    // g->lowpass_env.curves[1] = G_LOWPASS_CURVE2;
 
     g->lowpass.q = G_LOWPASS_Q;
 
     g->amp_env.seg_count = 1;
     g->amp_env.levels[0] = 0.0;
     g->amp_env.levels[1] = 1.0;
-    // g->amp_env.levels[2] = 1.0;
-    // g->amp_env.levels[3] = 0.0;
     g->amp_env.durations[0] = G_AMP_RISE_DUR;
-    // g->amp_env.durations[1] = G_AMP_FULL_DUR;
-    // g->amp_env.durations[2] = G_AMP_FALL_DUR;
     g->amp_env.curves[0] = G_AMP_CURVE1;
-    // g->amp_env.curves[1] = 0.0;
-    // g->amp_env.curves[2] = G_AMP_CURVE3;
 
 #ifdef HURRY_UP
     g->lowpass_env.durations[0] /= HURRY_UP;
@@ -413,23 +311,10 @@ static void init_env_state(env_state *estate, const env_cfg *ecfg)
 
 static void init_sweeper_state(sweeper_state *sstate, const sweeper_cfg *scfg)
 {
-#ifdef SIMPLE_SWEEP
-
-    sstate->direction = D_BLURRING;
-    sstate->value = 1;
-    sstate->delta = 0;
-    sstate->grow = 1;
-
-#else
-
     sstate->direction = D_BLURRING;
     sstate->value = 0;
-    init_env_state(&sstate->focus, &scfg->focus);
-    init_env_state(&sstate->blur, &scfg->blur);
-    sstate->blur.seg_index = 2;
-    sstate->blur.value = 0;
-
-#endif
+    sstate->delta = 0;
+    sstate->grow = 1;
 }
 
 static void init_filter_state(filter_state *fstate, const filter_cfg *fcfg)
@@ -538,23 +423,21 @@ static void update_sweeper_state(sweeper_state     *sstate,
                                  sweeper_cfg const *scfg)
 {
 
-#ifdef SIMPLE_SWEEP
-
     switch (sstate->direction) {
 
         case D_FOCUSING:
-        case D_BLURRING:
             if (sstate->value >= 1) {
                 sstate->value = 1;
                 return;
             }
             break;
 
-            // if (sstate->value <= 0) {
-            //     sstate->value = 0;
-            //     return;
-            // }
-            // break;
+        case D_BLURRING:
+            if (sstate->value <= 0) {
+                sstate->value = 0;
+                return;
+            }
+            break;
     }
 
     float value = sstate->value;
@@ -563,80 +446,21 @@ static void update_sweeper_state(sweeper_state     *sstate,
     delta *= sstate->grow;
     sstate->value = value;
     sstate->delta = delta;
-    
-    // double a2 = sstate->a2;
-    // double b1 = sstate->b1;
-    // double grow = sstate->grow;
-    // b1 *= grow;
-    // sstate->value = a2 - b1;
-    // // sstate->value += b1;
-    // sstate->b1 = b1;
-
-#else
-
-    switch (sstate->direction) {
-
-        case D_FOCUSING:
-            update_env_state(&sstate->focus, &scfg->focus);
-            sstate->value = sstate->focus.value;
-            break;
-
-        case D_BLURRING:
-            update_env_state(&sstate->blur, &scfg->blur);
-            sstate->value = sstate->blur.value;
-            break;
-    }
-
-#endif
-
 }
-
-#ifdef SIMPLE_SWEEP
 
 static float sweeper_interpolate(sweeper_state const *sstate,
                                  float                blur_freq,
-                                 float                prev_freq,
                                  float                dest_freq)
 {
-    float f0 = 0, f1 = 0;
     float sweep = sstate->value;
-
-    assert(-0.1 < sweep && sweep < +1.1);
-    switch (sstate->direction) {
-
-        case D_FOCUSING:
-            f0 = blur_freq;
-            f1 = dest_freq;
-            break;
-
-        case D_BLURRING:
-            f0 = dest_freq;
-            f1 = blur_freq;
-            break;
-    }
-    return sweep * f1 + (1 - sweep) * f0;
+    return sweep * dest_freq + (1 - sweep) * blur_freq;
 }
-
-#endif
 
 static void sweeper_focus(sweeper_state *sstate, sweeper_cfg const *scfg)
 {
-
-#ifdef SIMPLE_SWEEP
-
-    sstate->direction = D_FOCUSING;
-    // float level0 = 0;
-    // float level1 = 1;
-    // float dur = scfg->focus_dur;
-    // float exp = scfg->focus_exp;
-    // double a1 = (level1 - level0) / (1.0 - expf(exp));
-    // sstate->a2 = level0 + a1;
-    // sstate->b1 = a1;
-    // sstate->grow = expf(exp / (Fk * dur));
     float dur = scfg->focus_dur;
     float exp = scfg->focus_exp;
     float value = sstate->value;
-    value = 1.0 - value;
     float kdur = Fk * dur;
     float c = expf(exp) - 1;
     if (fabsf(c) < 0.005) {
@@ -646,60 +470,24 @@ static void sweeper_focus(sweeper_state *sstate, sweeper_cfg const *scfg)
         sstate->delta = exp * expf(exp * value) / c / kdur;
         sstate->grow = expf(exp / kdur);
     }
-    sstate->value = value;
-    
-#else
-
-    sstate->focus.value = sstate->value;
-    sstate->focus.seg_index = -1;
-    sstate->focus.frame_number = 0;
-    sstate->focus.end_fn = 0;
-
-#endif
-
+    sstate->direction = D_FOCUSING;
 }
 
 static void sweeper_blur(sweeper_state *sstate, sweeper_cfg const *scfg)
 {
-
-#ifdef SIMPLE_SWEEP
-
-    sstate->direction = D_BLURRING;
-    // float level0 = 1;
-    // float level1 = 0;
-    // float dur = scfg->focus_dur;
-    // float exp = scfg->focus_exp;
-    // double a1 = (level1 - level0) / (1.0 - expf(exp));
-    // sstate->a2 = level0 + a1;
-    // sstate->b1 = a1;
-    // sstate->grow = expf(exp / (Fk * dur));
     float dur = scfg->blur_dur;
     float exp = scfg->blur_exp;
     float value = sstate->value;
-    value = 1.0 - value;
     float kdur = Fk * dur;
     float c = expf(exp) - 1;
     if (fabsf(c) < 0.005) {
-        // sstate->delta = -1.0 / kdur;
-        sstate->delta = 1.0 / kdur;
+        sstate->delta = -1.0 / kdur;
         sstate->grow = 1.0;
     } else {
-        // sstate->delta = -exp * expf(exp * (1.0 - value)) / c / kdur;
-        sstate->delta = exp * expf(exp * value) / c / kdur;
+        sstate->delta = -exp * expf(exp * (1.0 - value)) / c / kdur;
         sstate->grow = expf(exp / kdur);
     }
-    sstate->value = value;
-
-#else
-
     sstate->direction = D_BLURRING;
-    sstate->blur.value = sstate->value;
-    sstate->blur.seg_index = -1;
-    sstate->blur.frame_number = 0;
-    sstate->blur.end_fn = 0;
-
-#endif
-
 }
 
 static void update_filter_state(filter_state     *fstate,
@@ -727,16 +515,10 @@ static void update_state(global_state *state)
         update_noise_state(&vstate->rand_noise, &vcfg->rand_noise);
         update_noise_state(&vstate->dest_noise, &vcfg->dest_noise);
         update_sweeper_state(&vstate->sweep, &vcfg->sweep);
-        // float freq1 = vcfg->rand_freq + vstate->rand_noise.level;
-        // float freq2 = vstate->dest_freq + vstate->dest_noise.level;
-        // float sweep = vstate->sweep.value;
-        // assert(-0.1 < sweep && sweep < +1.1);
-        // float freq = sweep * freq2 + (1 - sweep) * freq1;
         float blur_freq = vcfg->rand_freq + vstate->rand_noise.level;
-        float prev_freq = vstate->prev_freq + vstate->dest_noise.level;
+        // float prev_freq = vstate->prev_freq + vstate->dest_noise.level;
         float dest_freq = vstate->dest_freq + vstate->dest_noise.level;
-        float freq = sweeper_interpolate(&vstate->sweep,
-                                         blur_freq, prev_freq, dest_freq);
+        float freq = sweeper_interpolate(&vstate->sweep, blur_freq, dest_freq);
         float filt_freq = freq * V_LOWPASS_H;
         update_filter_state(&vstate->lowpass, &vcfg->lowpass, filt_freq);
         vstate->osc.inc = freq / Fs * 2;
@@ -896,8 +678,6 @@ static void assign_voices(void)
                 vstate->prev_freq = vstate->dest_freq;
                 vstate->dest_note = note;
                 vstate->dest_freq = freq;
-                // gstate.voices[i].dest_note = note;
-                // gstate.voices[i].dest_freq = freq;
             }
             note = (note + 1) % NOTE_COUNT;
         }
@@ -908,8 +688,6 @@ static void assign_voices(void)
                 vstate->prev_note = vstate->dest_note;
                 vstate->prev_freq = vstate->dest_freq;
                 vstate->dest_note = NO_NOTE;
-                // gstate.voices[i].dest_note = NO_NOTE;
-                // gstate.voices[i].dest_note = NO_NOTE;
             }
         }
     }
