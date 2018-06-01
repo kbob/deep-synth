@@ -1,5 +1,6 @@
 #include "synth.h"
 
+#define SLIDE
 //#define HURRY_UP 8
 
 #include <assert.h>
@@ -12,10 +13,9 @@
 
 #include "intr.h"
 
-// XXX I like the part where all the configuration parameters
-// are in a big struct.  Makes it easy to find and track them.
-
 // XXX todo: randomize noise generators' starting phase.
+
+// XXX todo: add 5ths and 3rd as in "THX Original Score".
 
 #define VOICE_COUNT      3
 #define NOTE_COUNT       12 
@@ -34,22 +34,25 @@
 #define V_RAND_NOISE_MAX   180.0
 #define V_DEST_OCTAVES     5
 #define V_DEST_NOISE_FREQ  0.1
-#define V_DEST_NOISE_MAX   10.0
+#define V_DEST_NOISE_MAX   0.0
+// #define V_DEST_NOISE_MAX   10.0
 
 #define V_SWEEP_FOCUS_DUR_MIN 3.0
 #define V_SWEEP_FOCUS_DUR_MAX 4.0
 #define V_SWEEP_FOCUS_EXP_MIN 3.0
 #define V_SWEEP_FOCUS_EXP_MAX 5.0
 
-// #define V_SWEEP_SLIDE_DUR_MIN 0.8
-// #define V_SWEEP_SLIDE_DUR_MAX 1.2
-// #define V_SWEEP_SLIDE_EXP_MIN 1.0
-// #define V_SWEEP_SLIDE_EXP_MAX 2.0
-
 #define V_SWEEP_BLUR_DUR_MIN  3.0
 #define V_SWEEP_BLUR_DUR_MAX  3.5
 #define V_SWEEP_BLUR_EXP_MIN  3.0
 #define V_SWEEP_BLUR_EXP_MAX  5.0
+
+#ifdef SLIDE
+    #define V_SWEEP_SLIDE_DUR_MIN 0.8
+    #define V_SWEEP_SLIDE_DUR_MAX 1.2
+    #define V_SWEEP_SLIDE_EXP_MIN (-3.0)
+    #define V_SWEEP_SLIDE_EXP_MAX (+3.0)
+#endif
 
 #define V_LOWPASS_H        6.0  // number of harmonics
 #define V_LOWPASS_Q        1.67
@@ -82,6 +85,7 @@ typedef struct env_cfg {
 } env_cfg;
 
 typedef struct sweeper_cfg {
+    float             initial_value;
     float             focus_dur;
     float             focus_exp;
     float             blur_dur;
@@ -96,7 +100,10 @@ typedef struct voice_cfg {
     float             rand_freq;
     noise_cfg         rand_noise;
     noise_cfg         dest_noise;
-    sweeper_cfg       sweep;
+    sweeper_cfg       focus;
+#ifdef SLIDE
+    sweeper_cfg       slide;
+#endif
     filter_cfg        lowpass;
     float             amp;
     float             pan;
@@ -160,15 +167,18 @@ typedef struct filter_state {
     float             s1;
 } filter_state;
 
-
 typedef struct voice_state {
-    int               dest_note;
+    float             focus_freq;
+    int               note;
     float             dest_freq;
-    int               prev_note;
+    // int               prev_note;
     float             prev_freq;
     noise_state       rand_noise;
     noise_state       dest_noise;
-    sweeper_state     sweep;
+    sweeper_state     focus;
+#ifdef SLIDE
+    sweeper_state     slide;
+#endif
     osc_state         osc;
     filter_state      lowpass;
     float             left_gain;
@@ -240,12 +250,25 @@ static void init_cfg(global_cfg *g)
         v->dest_noise.freq = V_DEST_NOISE_FREQ;
         v->dest_noise.amp = (i + 1) * V_DEST_NOISE_MAX / VOICE_COUNT;
 
-        v->sweep.focus_dur =
+        v->focus.initial_value = 0;
+        v->focus.focus_dur =
             rrand(V_SWEEP_FOCUS_DUR_MIN, V_SWEEP_FOCUS_DUR_MAX);
-        v->sweep.focus_exp =
+        v->focus.focus_exp =
             rrand(V_SWEEP_FOCUS_EXP_MIN, V_SWEEP_FOCUS_EXP_MAX);
-        v->sweep.blur_dur = rrand(V_SWEEP_BLUR_DUR_MIN, V_SWEEP_BLUR_DUR_MAX);
-        v->sweep.blur_exp = rrand(V_SWEEP_BLUR_EXP_MIN, V_SWEEP_BLUR_EXP_MAX);
+        v->focus.blur_dur = rrand(V_SWEEP_BLUR_DUR_MIN, V_SWEEP_BLUR_DUR_MAX);
+        v->focus.blur_exp = rrand(V_SWEEP_BLUR_EXP_MIN, V_SWEEP_BLUR_EXP_MAX);
+
+#ifdef SLIDE
+        v->slide.initial_value = 1;
+        v->slide.focus_dur =
+            rrand(V_SWEEP_SLIDE_DUR_MIN, V_SWEEP_SLIDE_DUR_MAX);
+        v->slide.focus_exp =
+            rrand(V_SWEEP_SLIDE_EXP_MIN, V_SWEEP_SLIDE_EXP_MAX);
+        // v->slide.blur_dur =
+        //     rrand(V_SWEEP_SLIDE_DUR_MIN, V_SWEEP_SLIDE_DUR_MAX);
+        // v->slide.blur_exp =
+        //     rrand(V_SWEEP_SLIDE_EXP_MIN, V_SWEEP_SLIDE_EXP_MAX);
+#endif
 
         v->lowpass.q = V_LOWPASS_Q;
 
@@ -255,8 +278,11 @@ static void init_cfg(global_cfg *g)
         v->pan = rrand(V_PAN_LEFT, V_PAN_RIGHT);
 
 #ifdef HURRY_UP
-        v->sweep.focus_dur /= HURRY_UP;
-        v->sweep.blur_dur  /= HURRY_UP;
+        v->focus.focus_dur /= HURRY_UP;
+        v->focus.blur_dur  /= HURRY_UP;
+#ifdef SLIDE
+        v->slide.focus_dur /= HURRY_UP;
+#endif
 #endif /* HURRY_UP */
     }
 
@@ -311,8 +337,9 @@ static void init_env_state(env_state *estate, const env_cfg *ecfg)
 
 static void init_sweeper_state(sweeper_state *sstate, const sweeper_cfg *scfg)
 {
-    sstate->direction = D_BLURRING;
-    sstate->value = 0;
+    float value = scfg->initial_value;
+    sstate->direction = value ? D_FOCUSING : D_BLURRING;
+    sstate->value = value;
     sstate->delta = 0;
     sstate->grow = 1;
 }
@@ -333,7 +360,10 @@ static void init_state(global_state *state, const global_cfg *cfg)
         const voice_cfg *vcfg = &cfg->voices[i];
         init_noise_state(&vstate->rand_noise, &vcfg->rand_noise);
         init_noise_state(&vstate->dest_noise, &vcfg->dest_noise);
-        init_sweeper_state(&vstate->sweep, &vcfg->sweep);
+        init_sweeper_state(&vstate->focus, &vcfg->focus);
+#ifdef SLIDE
+        init_sweeper_state(&vstate->slide, &vcfg->slide);
+#endif
         init_filter_state(&vstate->lowpass, &vcfg->lowpass);
         float pos = (vcfg->pan + 1) * M_PI_4;
         vstate->left_gain = vcfg->amp * cosf(pos) / VOICE_COUNT;
@@ -506,6 +536,117 @@ static void update_filter_state(filter_state     *fstate,
     fstate->f = 2 * sinf(M_PI * freq / samples / Fs);
 }
 
+#ifdef SLIDE
+
+static float voice_freq(voice_state *vstate, voice_cfg const *vcfg)
+{
+    float blur_freq = vcfg->rand_freq + vstate->rand_noise.level;
+    float prev_freq = vstate->prev_freq;
+    float dest_freq = vstate->dest_freq;
+    float focus_freq =
+        sweeper_interpolate(&vstate->slide, prev_freq, dest_freq);
+    return sweeper_interpolate(&vstate->focus, blur_freq, focus_freq);
+    // float focus_freq;
+    // if (vstate->prev_note == NO_NOTE) {
+    //     focus_freq = vstate->dest_freq;
+    // } else if (vstate->note == NO_NOTE) {
+    //     focus_freq = vstate->focus_freq;
+    // } else {
+    //     float prev_freq = vstate->prev_freq;
+    //     float dest_freq = vstate->dest_freq;
+    //     focus_freq = sweeper_interpolate(&vstate->slide, prev_freq, dest_freq);
+    //     vstate->focus_freq = focus_freq;
+    // }
+    // float blur_freq = vcfg->rand_freq + vstate->rand_noise.level;
+    // return sweeper_interpolate(&vstate->focus, blur_freq, focus_freq);
+}
+
+static void voice_assign(voice_state     *vstate,
+                         voice_cfg const *vcfg,
+                         int              note,
+                         float            freq)
+{
+
+#if 1
+
+    if (note == vstate->note)
+        return;
+
+    if (note == NO_NOTE) {
+        // Blur.  Leave slider alone.
+    } else {
+        if (vstate->note == NO_NOTE) {
+            // Focus.
+            if (vstate->focus.value == 0) {
+                // Fully blurred.  No slide needed.
+                vstate->prev_freq = freq;
+                vstate->dest_freq = freq;
+                vstate->focus.direction = D_FOCUSING;
+                vstate->focus.value = 1.0;
+            }
+        }
+        float svalue = vstate->slide.value;
+        if (svalue == 1.0) {
+            // Previous slide finished.  Start new slide.
+            vstate->prev_freq = vstate->dest_freq;
+            vstate->slide.value = 0.0;
+            sweeper_focus(&vstate->slide, &vcfg->slide);
+        } else if (svalue < 0.01) {
+            // Previous slide just started.  Start new slide from
+            // current freq.
+            vstate->prev_freq = vstate->focus_freq;
+            vstate->slide.value = 0.0;
+            sweeper_focus(&vstate->slide, &vcfg->slide);
+        } else {
+            // Interrupted slide in progress.  Slide faster from
+            // current freq to dest.
+            // y = (c + d (p - 1)) / p;
+            
+            vstate->prev_freq =
+                (vstate->focus_freq + freq * (svalue - 1)) / svalue;
+            vstate->slide.value = 1.0 - svalue;
+            sweeper_focus(&vstate->slide, &vcfg->slide);
+        }
+        vstate->dest_freq = freq;
+    }
+    vstate->note = note;
+
+#else
+
+    if (note == vstate->note)
+        return;
+    if (vstate->note == NO_NOTE) {
+        // Previously no notes.  Slide from current freq to freq.
+        // vstate->prev_note = NO_NOTE;
+        vstate->prev_freq = vstate->dest_freq;
+        vstate->note = note;
+        vstate->dest_freq = freq;
+        float svalue = 1 - vstate->slide.value;
+        vstate->focus_freq = freq;
+        vstate->slide.value = svalue;
+        if (svalue < 0.01)
+            vstate->prev_freq = vstate->prev_freq;
+        else if (svalue == 1.0) {
+            vstate->prev_freq = freq;
+            // vstate
+            svalue = 0.01;
+        }
+        vstate->prev_freq = (freq - vstate->prev_freq) * (1 / svalue);
+        sweeper_focus(&vstate->slide, &vcfg->slide);
+    // } else if (vstate->prev_note == NO_NOTE) {
+        // Now no notes.  Continue slide.
+    } else {
+        // Previous note and new note.  Slide from
+        // focus_freq to dest_freq.
+        // vstate->slide.value
+    }
+
+#endif
+
+}
+
+#endif
+
 static void update_state(global_state *state)
 {
     const global_cfg *cfg = state->cfg;
@@ -514,11 +655,26 @@ static void update_state(global_state *state)
         const voice_cfg *vcfg = &cfg->voices[i];
         update_noise_state(&vstate->rand_noise, &vcfg->rand_noise);
         update_noise_state(&vstate->dest_noise, &vcfg->dest_noise);
-        update_sweeper_state(&vstate->sweep, &vcfg->sweep);
+        update_sweeper_state(&vstate->focus, &vcfg->focus);
+#ifdef SLIDE
+        update_sweeper_state(&vstate->slide, &vcfg->slide);
+        float freq = voice_freq(vstate, vcfg);
+        // float blur_freq = vcfg->rand_freq + vstate->rand_noise.level;
+        // float dest_freq = vstate->dest_freq;
+        // if (vstate->prev_note != NO_NOTE && vstate->note != NO_NOTE) {
+        //     float prev_freq = vstate->prev_freq;
+        //     cur = sweeper_interpolate(&vstate->slide, prev_freq, dest_freq);
+
+        // if (prev_freq != NO_NOTE && dest_freq != NO_NOTE)
+        // float dest_freq = sweeper_interpolate(&vstate->slide, prev_freq, dest_freq);
+        // // float prev_freq = vstate->prev_freq + vstate->dest_noise.level;
+        // float dest_freq = vstate->dest_freq + vstate->dest_noise.level;
+        // float freq = sweeper_interpolate(&vstate->focus, blur_freq, dest_freq);
+#else
         float blur_freq = vcfg->rand_freq + vstate->rand_noise.level;
-        // float prev_freq = vstate->prev_freq + vstate->dest_noise.level;
         float dest_freq = vstate->dest_freq + vstate->dest_noise.level;
-        float freq = sweeper_interpolate(&vstate->sweep, blur_freq, dest_freq);
+        float freq = sweeper_interpolate(&vstate->focus, blur_freq, dest_freq);
+#endif
         float filt_freq = freq * V_LOWPASS_H;
         update_filter_state(&vstate->lowpass, &vcfg->lowpass, filt_freq);
         vstate->osc.inc = freq / Fs * 2;
@@ -673,11 +829,18 @@ static void assign_voices(void)
             assert(12 <= note && note <= 81);
             float freq = midi_to_freq[note];
             voice_state *vstate = &gstate.voices[i];
+#ifdef SLIDE
+            const voice_cfg *vcfg = &gcfg.voices[i];
+#endif
             WITH_INTERRUPTS_MASKED {
-                vstate->prev_note = vstate->dest_note;
+#ifdef SLIDE
+                voice_assign(vstate, vcfg, note, freq);
+#else
+                // vstate->prev_note = vstate->note;
                 vstate->prev_freq = vstate->dest_freq;
-                vstate->dest_note = note;
+                vstate->note = note;
                 vstate->dest_freq = freq;
+#endif
             }
             note = (note + 1) % NOTE_COUNT;
         }
@@ -685,9 +848,12 @@ static void assign_voices(void)
         for (size_t i = 0; i < VOICE_COUNT; i++) {
             voice_state *vstate = &gstate.voices[i];
             WITH_INTERRUPTS_MASKED {
-                vstate->prev_note = vstate->dest_note;
+#ifdef SLIDE
                 vstate->prev_freq = vstate->dest_freq;
-                vstate->dest_note = NO_NOTE;
+                vstate->note = NO_NOTE;
+#else
+                voice_assign(NO_NOTE, vstate->dest_freq);
+#endif                
             }
         }
     }
@@ -696,8 +862,8 @@ static void assign_voices(void)
 static void focus_voices(void)
 {
     for (size_t i = 0; i < VOICE_COUNT; i++) {
-        sweeper_state *sstate = &gstate.voices[i].sweep;
-        const sweeper_cfg *scfg = &gstate.cfg->voices[i].sweep;
+        sweeper_state *sstate = &gstate.voices[i].focus;
+        const sweeper_cfg *scfg = &gstate.cfg->voices[i].focus;
         WITH_INTERRUPTS_MASKED {
             sweeper_focus(sstate, scfg);
         }
@@ -707,8 +873,8 @@ static void focus_voices(void)
 static void blur_voices(void)
 {
     for (size_t i = 0; i < VOICE_COUNT; i++) {
-        sweeper_state *sstate = &gstate.voices[i].sweep;
-        const sweeper_cfg *scfg = &gstate.cfg->voices[i].sweep;
+        sweeper_state *sstate = &gstate.voices[i].focus;
+        const sweeper_cfg *scfg = &gstate.cfg->voices[i].focus;
         WITH_INTERRUPTS_MASKED {
             sweeper_blur(sstate, scfg);
         }
