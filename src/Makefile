@@ -33,7 +33,7 @@ include ../libopencm3.target.mk
 cflags := $(filter_out -O%, $(CFLAGS)) -Werror -g
 # In theory this -O should be valid for everything but video.o but somehow it
 # affects everything? :(
-OPT 	:= -O0
+OPT 	:= -O3
 CFLAGS	 = $(cflags) $(OPT)
 
 # If your project is using a specific C standard you can set it by uncommenting
