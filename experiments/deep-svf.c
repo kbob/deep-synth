@@ -13,8 +13,10 @@
 #define Fs 44100                // Sample Rate
 #define Fk   500                // Control Rate
 
-#define VOICE_COUNT        30
+#define VOICE_COUNT        32
 #define MAX_ENV_SEGS       3
+#define FIRST_VOICE        0
+#define LAST_VOICE         31
 
 // Voice Parameters
 #define V_RAND_FREQ_MIN    200
@@ -654,7 +656,7 @@ void gen_chunk(global_state *state, frame *buf, size_t frame_count)
 {
     memset(buf, 0, frame_count * sizeof *buf);
     update_state(state);
-    for (size_t i = 0; i < VOICE_COUNT; i++) {
+    for (size_t i = FIRST_VOICE; i <= LAST_VOICE; i++) {
         float voice_buf[frame_count];
         voice_state *vstate = &state->voices[i];
         osc_gen_chunk(voice_buf, frame_count, &vstate->osc);
@@ -726,7 +728,7 @@ void gen_samples(const global_cfg *cfg)
 {
     global_state state;
     init_state(&state, cfg);
-    
+
     float total_duration = G_AMP_RISE_DUR + G_AMP_FULL_DUR + G_AMP_FALL_DUR;
 #ifdef HURRY_UP
     total_duration /= HURRY_UP;
